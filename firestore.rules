@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "eniofds@gmail.com" && request.auth.token.email_verified == true
+      );
+    }
+
+    // Candidates: Admin can CRUD, Voters can read
+    match /candidates/{candidateId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Voters: Admin can CRUD, Voters can read (to check RA)
+    match /voters/{voterId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+      // Allow voter to update their own 'voted' status
+      allow update: if isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voted']);
+    }
+
+    // Votes: Create only (no update/delete), Read for audit
+    match /votes/{voteId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // AuditLogs: Create only, Read for audit
+    match /auditLogs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // UrnaStatus: Admin can CRUD, Voters can read
+    match /urnaStatus/{statusId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+  }
+}

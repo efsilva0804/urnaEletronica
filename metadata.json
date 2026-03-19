@@ -1,0 +1,5 @@
+{
+  "name": "Urna Eletrônica Escolar Auditável",
+  "description": "Sistema de votação escolar com integridade de dados via hashing, auditoria em tempo real e relatórios de apuração.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "Candidate": {
+      "title": "Candidato",
+      "description": "Representa um candidato na eleição.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "number": { "type": "string" },
+        "party": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "votesCount": { "type": "number" }
+      },
+      "required": ["name", "number"]
+    },
+    "Voter": {
+      "title": "Eleitor",
+      "description": "Representa um eleitor (aluno) com RA.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ra": { "type": "string" },
+        "name": { "type": "string" },
+        "class": { "type": "string" },
+        "voted": { "type": "boolean" }
+      },
+      "required": ["ra", "name"]
+    },
+    "Vote": {
+      "title": "Voto",
+      "description": "Um voto individual na urna.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "candidateId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "hash": { "type": "string" },
+        "previousHash": { "type": "string" }
+      },
+      "required": ["timestamp", "hash", "previousHash"]
+    },
+    "AuditLog": {
+      "title": "Log de Auditoria",
+      "description": "Registros de eventos do sistema.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "event": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "details": { "type": "string" }
+      },
+      "required": ["event", "timestamp"]
+    },
+    "UrnaStatus": {
+      "title": "Status da Urna",
+      "description": "Controla se a votação está aberta ou fechada.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "isOpen": { "type": "boolean" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" }
+      },
+      "required": ["isOpen"]
+    }
+  },
+  "firestore": {
+    "candidates": {
+      "schema": "Candidate",
+      "description": "Coleção de candidatos."
+    },
+    "voters": {
+      "schema": "Voter",
+      "description": "Coleção de eleitores permitidos."
+    },
+    "votes": {
+      "schema": "Vote",
+      "description": "Coleção de votos registrados (Boletim de Urna)."
+    },
+    "auditLogs": {
+      "schema": "AuditLog",
+      "description": "Logs de eventos do sistema."
+    },
+    "urnaStatus": {
+      "schema": "UrnaStatus",
+      "description": "Status global da urna."
+    }
+  }
+}
