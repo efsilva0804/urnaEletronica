@@ -30,14 +30,16 @@ service cloud.firestore {
     match /votes/{voteId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
-      allow update, delete: if false;
+      allow delete: if isAdmin();
+      allow update: if false;
     }
 
     // AuditLogs: Create only, Read for audit
     match /auditLogs/{logId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
-      allow update, delete: if false;
+      allow delete: if isAdmin();
+      allow update: if false;
     }
 
     // UrnaStatus: Admin can CRUD, Voters can read

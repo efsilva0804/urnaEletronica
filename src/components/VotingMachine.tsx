@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Candidate, Voter, UrnaStatus } from '../types';
 import { registerVote } from '../services/votingService';
 import { User, Hash, CheckCircle2, AlertCircle, Shield, ChevronRight, Search, Users } from 'lucide-react';
@@ -21,9 +21,13 @@ export function VotingMachine({ urnaStatus }: { urnaStatus: UrnaStatus | null })
   useEffect(() => {
     const unsubCandidates = onSnapshot(collection(db, 'candidates'), (snapshot) => {
       setCandidates(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Candidate)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'candidates');
     });
     const unsubVoters = onSnapshot(collection(db, 'voters'), (snapshot) => {
       setVoters(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Voter)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'voters');
     });
     return () => {
       unsubCandidates();
@@ -57,9 +61,20 @@ export function VotingMachine({ urnaStatus }: { urnaStatus: UrnaStatus | null })
 
   const handleVote = async () => {
     if (!voter) return;
+    
+    // Validation
+    const isBlank = candidateNumber === '00';
+    const isNull = candidateNumber === '99';
+    const isCandidate = candidates.some(c => c.number === candidateNumber);
+    
+    if (!isBlank && !isNull && !isCandidate && candidateNumber.length === 2) {
+      setError('Número de candidato inválido.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const voteId = selectedCandidate ? selectedCandidate.id : (candidateNumber === '00' ? 'BLANK' : 'NULL');
+      const voteId = isCandidate ? selectedCandidate!.id : (isBlank ? 'BLANK' : 'NULL');
       await registerVote(voteId, voter.id);
       setStep('SUCCESS');
       setTimeout(() => {
@@ -70,6 +85,7 @@ export function VotingMachine({ urnaStatus }: { urnaStatus: UrnaStatus | null })
         setSelectedCandidate(null);
         setIsSubmitting(false);
         setSearchTerm('');
+        setError('');
       }, 3000);
     } catch (err) {
       console.error(err);
@@ -81,10 +97,19 @@ export function VotingMachine({ urnaStatus }: { urnaStatus: UrnaStatus | null })
   const appendNumber = (num: string) => {
     if (candidateNumber.length < 2) {
       setCandidateNumber(prev => prev + num);
+      setError('');
     }
   };
 
-  const clearNumber = () => setCandidateNumber('');
+  const clearNumber = () => {
+    setCandidateNumber('');
+    setError('');
+  };
+
+  const isInvalidNumber = candidateNumber.length === 2 && 
+                         !candidates.some(c => c.number === candidateNumber) && 
+                         candidateNumber !== '00' && 
+                         candidateNumber !== '99';
 
   if (step === 'SUCCESS') {
     return (
@@ -226,12 +251,21 @@ export function VotingMachine({ urnaStatus }: { urnaStatus: UrnaStatus | null })
                     </div>
                   </div>
 
-                  {candidateNumber.length === 2 && (
+                  {(candidateNumber.length === 2 || candidateNumber === '00' || candidateNumber === '99') && (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-                      <div>
-                        <span className="text-xs font-bold text-zinc-400 block">NOME:</span>
-                        <span className="text-lg font-bold uppercase">{selectedCandidate ? selectedCandidate.name : 'VOTO NULO'}</span>
-                      </div>
+                      {isInvalidNumber ? (
+                        <div className="text-red-500 font-bold text-sm flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4" />
+                          NÚMERO ERRADO
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="text-xs font-bold text-zinc-400 block">NOME:</span>
+                          <span className="text-lg font-bold uppercase">
+                            {selectedCandidate ? selectedCandidate.name : (candidateNumber === '00' ? 'VOTO EM BRANCO' : 'VOTO NULO')}
+                          </span>
+                        </div>
+                      )}
                       {selectedCandidate && (
                         <div>
                           <span className="text-xs font-bold text-zinc-400 block">PARTIDO:</span>
@@ -281,23 +315,29 @@ export function VotingMachine({ urnaStatus }: { urnaStatus: UrnaStatus | null })
                 <div />
               </div>
 
-              <div className="grid grid-cols-3 gap-3 mt-6">
+              <div className="grid grid-cols-4 gap-2 mt-6">
                 <button
-                  onClick={() => { setCandidateNumber('00'); setSelectedCandidate(null); }}
-                  className="h-14 bg-white hover:bg-zinc-100 text-zinc-900 text-xs font-bold rounded uppercase border-b-4 border-zinc-300 active:border-b-0 active:translate-y-1 transition-all"
+                  onClick={() => { setCandidateNumber('00'); setSelectedCandidate(null); setError(''); }}
+                  className="h-14 bg-white hover:bg-zinc-100 text-zinc-900 text-[10px] font-bold rounded uppercase border-b-4 border-zinc-300 active:border-b-0 active:translate-y-1 transition-all"
                 >
                   Branco
                 </button>
                 <button
+                  onClick={() => { setCandidateNumber('99'); setSelectedCandidate(null); setError(''); }}
+                  className="h-14 bg-zinc-600 hover:bg-zinc-500 text-white text-[10px] font-bold rounded uppercase border-b-4 border-zinc-800 active:border-b-0 active:translate-y-1 transition-all"
+                >
+                  Nulo
+                </button>
+                <button
                   onClick={clearNumber}
-                  className="h-14 bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold rounded uppercase border-b-4 border-orange-700 active:border-b-0 active:translate-y-1 transition-all"
+                  className="h-14 bg-orange-500 hover:bg-orange-400 text-white text-[10px] font-bold rounded uppercase border-b-4 border-orange-700 active:border-b-0 active:translate-y-1 transition-all"
                 >
                   Corrige
                 </button>
                 <button
                   onClick={handleVote}
-                  disabled={isSubmitting || (candidateNumber.length < 2 && candidateNumber !== '00')}
-                  className="h-14 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded uppercase border-b-4 border-emerald-800 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center gap-2"
+                  disabled={isSubmitting || (candidateNumber.length < 2 && candidateNumber !== '00' && candidateNumber !== '99') || isInvalidNumber}
+                  className="h-14 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[10px] font-bold rounded uppercase border-b-4 border-emerald-800 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center gap-1"
                 >
                   {isSubmitting ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity }} className="w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> : 'Confirma'}
                 </button>

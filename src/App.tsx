@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { Candidate, Voter, UrnaStatus, AuditLog } from './types';
 import { VotingMachine } from './components/VotingMachine';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -26,17 +26,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!user) return;
     const statusRef = doc(db, 'urnaStatus', 'global');
     const unsubscribe = onSnapshot(statusRef, (docSnap) => {
       if (docSnap.exists()) {
         setUrnaStatus(docSnap.data() as UrnaStatus);
-      } else {
-        // Initialize status if not exists
+      } else if (isAdmin) {
+        // Initialize status if not exists (only admin can do this)
         setDoc(statusRef, { isOpen: false });
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'urnaStatus/global');
     });
     return () => unsubscribe();
-  }, []);
+  }, [user, isAdmin]);
 
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider();

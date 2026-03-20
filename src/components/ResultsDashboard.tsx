@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Candidate, Voter, Vote } from '../types';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Download, FileJson, FileText, Users, UserCheck, UserX, Hash } from 'lucide-react';
@@ -15,12 +15,18 @@ export function ResultsDashboard() {
   useEffect(() => {
     const unsubCandidates = onSnapshot(collection(db, 'candidates'), (snap) => {
       setCandidates(snap.docs.map(d => ({ id: d.id, ...d.data() } as Candidate)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'candidates');
     });
     const unsubVoters = onSnapshot(collection(db, 'voters'), (snap) => {
       setVoters(snap.docs.map(d => ({ id: d.id, ...d.data() } as Voter)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'voters');
     });
     const unsubVotes = onSnapshot(collection(db, 'votes'), (snap) => {
       setVotes(snap.docs.map(d => ({ id: d.id, ...d.data() } as Vote)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'votes');
     });
 
     return () => {
@@ -78,32 +84,82 @@ export function ResultsDashboard() {
 
   const exportPDF = () => {
     const doc = new jsPDF();
-    doc.setFontSize(20);
-    doc.text('Boletim de Urna - Eleição Escolar', 20, 20);
+    const pageWidth = doc.internal.pageSize.getWidth();
     
+    // Header
+    doc.setFontSize(22);
+    doc.setTextColor(16, 185, 129); // Emerald-500
+    doc.text('BOLETIM DE URNA', pageWidth / 2, 20, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setTextColor(113, 113, 122); // Zinc-500
+    doc.text('JUSTIÇA ELEITORAL ESCOLAR - SISTEMA AUDITÁVEL', pageWidth / 2, 28, { align: 'center' });
+    
+    doc.setDrawColor(39, 39, 42); // Zinc-800
+    doc.line(20, 35, pageWidth - 20, 35);
+
+    // General Info
     doc.setFontSize(12);
-    doc.text(`Data: ${new Date().toLocaleString()}`, 20, 30);
-    doc.text(`Total de Eleitores: ${totalVoters}`, 20, 40);
-    doc.text(`Total de Votos: ${totalVotes}`, 20, 50);
-    doc.text(`Abstenção: ${abstentionCount}`, 20, 60);
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'bold');
+    doc.text('INFORMAÇÕES GERAIS', 20, 45);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(`Data de Emissão: ${new Date().toLocaleString()}`, 20, 52);
+    doc.text(`Total de Eleitores Aptos: ${totalVoters}`, 20, 58);
+    doc.text(`Total de Votos Computados: ${totalVotes}`, 20, 64);
+    doc.text(`Abstenções: ${abstentionCount} (${totalVoters > 0 ? ((abstentionCount / totalVoters) * 100).toFixed(1) : 0}%)`, 20, 70);
 
-    doc.text('Resultados:', 20, 80);
-    let y = 90;
-    candidates.forEach(c => {
-      doc.text(`${c.name} (${c.number}): ${c.votesCount || 0} votos`, 30, y);
-      y += 10;
+    // Results Summary
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('RESUMO DA VOTAÇÃO', 20, 85);
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    let y = 95;
+    
+    // Candidates
+    candidates.sort((a, b) => (b.votesCount || 0) - (a.votesCount || 0)).forEach(c => {
+      doc.text(`${c.name.padEnd(40)} (${c.number}):`, 25, y);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${c.votesCount || 0} votos`, 120, y);
+      doc.setFont('helvetica', 'normal');
+      y += 7;
     });
-    doc.text(`Brancos: ${blankVotes}`, 30, y);
-    doc.text(`Nulos: ${nullVotes}`, 30, y + 10);
+    
+    // Blanks and Nulls
+    doc.text('Votos em BRANCO:', 25, y);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${blankVotes} votos`, 120, y);
+    doc.setFont('helvetica', 'normal');
+    y += 7;
+    
+    doc.text('Votos NULOS:', 25, y);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${nullVotes} votos`, 120, y);
+    doc.setFont('helvetica', 'normal');
+    y += 15;
 
-    doc.text('Cadeia de Auditoria (Hashes):', 20, y + 30);
-    y += 40;
-    votes.slice(-10).forEach(v => {
-      if (y > 270) { doc.addPage(); y = 20; }
-      doc.setFontSize(8);
-      doc.text(`Hash: ${v.hash}`, 20, y);
-      y += 5;
+    // Audit Chain
+    if (y > 250) { doc.addPage(); y = 20; }
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('CADEIA DE AUDITABILIDADE (HASHES)', 20, y);
+    doc.setFontSize(7);
+    doc.setFont('courier', 'normal');
+    y += 8;
+    
+    votes.forEach((v, index) => {
+      if (y > 280) { doc.addPage(); y = 20; }
+      doc.text(`[${(index + 1).toString().padStart(3, '0')}] HASH: ${v.hash}`, 20, y);
+      y += 4;
     });
+
+    // Footer
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
+    doc.text('Documento gerado digitalmente pela Urna Escolar Auditável.', pageWidth / 2, 290, { align: 'center' });
 
     doc.save(`boletim_urna_${new Date().getTime()}.pdf`);
   };

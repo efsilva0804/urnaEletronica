@@ -5,6 +5,7 @@ export interface Candidate {
   party: string;
   photoUrl: string;
   votesCount: number;
+  candidateHash?: string;
 }
 
 export interface Voter {
