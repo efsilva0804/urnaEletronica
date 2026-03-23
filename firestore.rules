@@ -1,7 +1,9 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -12,24 +14,69 @@ service cloud.firestore {
       );
     }
 
-    // Candidates: Admin can CRUD, Voters can read
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidString(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidCandidate() {
+      return hasOnlyAllowedFields(['name', 'number', 'party', 'photoUrl', 'votesCount', 'candidateHash']) &&
+             isValidString('name', 1, 100) &&
+             isValidString('number', 2, 5) &&
+             isValidString('party', 1, 50) &&
+             request.resource.data.votesCount is number;
+    }
+
+    function isValidVoter() {
+      return hasOnlyAllowedFields(['ra', 'name', 'class', 'voted']) &&
+             isValidString('ra', 1, 20) &&
+             isValidString('name', 1, 100) &&
+             isValidString('class', 1, 20) &&
+             request.resource.data.voted is bool;
+    }
+
+    function isValidVote() {
+      return hasOnlyAllowedFields(['candidateId', 'timestamp', 'hash', 'previousHash']) &&
+             isValidString('candidateId', 1, 50) &&
+             isValidString('timestamp', 1, 50) &&
+             isValidString('hash', 64, 64) &&
+             isValidString('previousHash', 1, 64);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // Candidates: Admin can CRUD, Authenticated users can read
     match /candidates/{candidateId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow create, update: if isAdmin() && isValidCandidate();
+      allow delete: if isAdmin();
     }
 
-    // Voters: Admin can CRUD, Voters can read (to check RA)
+    // Voters: Admin can CRUD, Authenticated users can read
     match /voters/{voterId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
-      // Allow voter to update their own 'voted' status
-      allow update: if isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voted']);
+      allow create: if isAdmin() && isValidVoter();
+      allow update: if (isAdmin() && isValidVoter()) || 
+                      (isAuthenticated() && 
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voted']) &&
+                       request.resource.data.voted == true);
+      allow delete: if isAdmin();
     }
 
-    // Votes: Create only (no update/delete), Read for audit
+    // Votes: Create only (no update), Read for audit
     match /votes/{voteId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidVote();
       allow delete: if isAdmin();
       allow update: if false;
     }
@@ -37,15 +84,15 @@ service cloud.firestore {
     // AuditLogs: Create only, Read for audit
     match /auditLogs/{logId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated() && hasOnlyAllowedFields(['event', 'timestamp', 'details']);
       allow delete: if isAdmin();
       allow update: if false;
     }
 
-    // UrnaStatus: Admin can CRUD, Voters can read
+    // UrnaStatus: Admin can CRUD, Authenticated users can read
     match /urnaStatus/{statusId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAdmin() && hasOnlyAllowedFields(['isOpen', 'startTime', 'endTime']);
     }
   }
 }

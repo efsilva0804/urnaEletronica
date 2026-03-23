@@ -4,7 +4,7 @@ import { db, storage, handleFirestoreError, OperationType } from '../firebase';
 import { Candidate, Voter, AuditLog, UrnaStatus } from '../types';
 import { verifyChainIntegrity, generateCandidateHash } from '../services/votingService';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Plus, Trash2, ShieldCheck, ShieldAlert, History, Users, UserPlus, Power, PowerOff, RefreshCw, FileText, FileJson, Upload, Download, FileUp, ImagePlus, FileSpreadsheet, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, ShieldCheck, ShieldAlert, History, Users, UserPlus, Power, PowerOff, RefreshCw, FileText, FileJson, Upload, Download, FileUp, ImagePlus, FileSpreadsheet, RotateCcw, AlertTriangle, Search, X } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import Papa from 'papaparse';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -23,6 +23,19 @@ export function AdminDashboard() {
   const [isChecking, setIsChecking] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [showModal, setShowModal] = useState<{
+    show: boolean;
+    type: 'restart' | 'full' | 'clearVoters' | null;
+    title: string;
+    message: string;
+    action: () => Promise<void>;
+  }>({
+    show: false,
+    type: null,
+    title: '',
+    message: '',
+    action: async () => {}
+  });
   const candidateFileRef = useRef<HTMLInputElement>(null);
   const voterFileRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -31,6 +44,8 @@ export function AdminDashboard() {
   const [newCandidate, setNewCandidate] = useState({ name: '', number: '', party: '', photoUrl: '' });
   const [candidatePhoto, setCandidatePhoto] = useState<File | null>(null);
   const [newVoter, setNewVoter] = useState({ ra: '', name: '', class: '' });
+  const [candidateSearch, setCandidateSearch] = useState('');
+  const [voterSearch, setVoterSearch] = useState('');
 
   useEffect(() => {
     const unsubCandidates = onSnapshot(collection(db, 'candidates'), (snap) => {
@@ -359,11 +374,8 @@ export function AdminDashboard() {
   };
 
   const handleRestartVoting = async () => {
-    if (!window.confirm('Deseja REINICIAR a votação?\n\n- TODOS os votos atuais serão apagados.\n- O status de "Votou" dos eleitores será resetado.\n- A contagem de votos dos candidatos voltará a zero.\n- Os logs de auditoria serão limpos.\n\nIMPORTANTE: A lista de CANDIDATOS e ELEITORES será MANTIDA.')) {
-      return;
-    }
-
     setIsResetting(true);
+    setShowModal(prev => ({ ...prev, show: false }));
     try {
       const votesSnap = await getDocs(collection(db, 'votes')).catch(e => handleFirestoreError(e, OperationType.GET, 'votes'));
       const votersSnap = await getDocs(collection(db, 'voters')).catch(e => handleFirestoreError(e, OperationType.GET, 'voters'));
@@ -423,12 +435,32 @@ export function AdminDashboard() {
     }
   };
 
-  const handleFullReset = async () => {
-    if (!window.confirm('ATENÇÃO CRÍTICA: Isso apagará TUDO (Votos, Candidatos, Eleitores e Logs). Esta ação é irreversível e limpa toda a base de dados. Deseja continuar?')) {
-      return;
-    }
-
+  const handleClearVoters = async () => {
     setIsResetting(true);
+    setShowModal(prev => ({ ...prev, show: false }));
+    try {
+      const votersSnap = await getDocs(collection(db, 'voters'));
+      const batch = writeBatch(db);
+      votersSnap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+
+      await addDoc(collection(db, 'auditLogs'), {
+        event: 'LIMPEZA DE ELEITORES',
+        timestamp: new Date().toISOString(),
+        details: `Todos os eleitores foram removidos pelo administrador.`
+      });
+
+      alert('Todos os dados dos eleitores foram apagados com sucesso!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'clear_voters');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleFullReset = async () => {
+    setIsResetting(true);
+    setShowModal(prev => ({ ...prev, show: false }));
     try {
       const votesSnap = await getDocs(collection(db, 'votes'));
       const votersSnap = await getDocs(collection(db, 'voters'));
@@ -601,7 +633,13 @@ export function AdminDashboard() {
           </button>
           
           <button
-            onClick={handleRestartVoting}
+            onClick={() => setShowModal({
+              show: true,
+              type: 'restart',
+              title: 'Reiniciar Votação',
+              message: 'Deseja zerar os votos e permitir uma nova eleição? Os candidatos e eleitores cadastrados serão mantidos.',
+              action: handleRestartVoting
+            })}
             disabled={isResetting || isChecking}
             className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-all disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-emerald-500 outline-none"
             title="Zerar votos e permitir nova votação mantendo candidatos e eleitores"
@@ -612,7 +650,13 @@ export function AdminDashboard() {
           </button>
 
           <button
-            onClick={handleFullReset}
+            onClick={() => setShowModal({
+              show: true,
+              type: 'full',
+              title: 'Limpeza Total',
+              message: 'ATENÇÃO: Deseja apagar permanentemente TUDO (Votos, Candidatos, Eleitores e Logs)? Esta ação não pode ser desfeita e limpará toda a base de dados para uma nova configuração.',
+              action: handleFullReset
+            })}
             disabled={isResetting || isChecking}
             className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold bg-red-950/20 hover:bg-red-900/30 text-red-500 border border-red-500/20 transition-all disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-red-500 outline-none"
             title="Apagar TUDO (Votos, Candidatos e Eleitores)"
@@ -620,6 +664,22 @@ export function AdminDashboard() {
           >
             <Trash2 className="w-5 h-5" />
             Limpar Tudo
+          </button>
+
+          <button
+            onClick={() => setShowModal({
+              show: true,
+              type: 'clearVoters',
+              title: 'Limpar Eleitores',
+              message: 'ATENÇÃO: Deseja apagar permanentemente todos os eleitores cadastrados? Esta ação não pode ser desfeita e removerá todos os registros da base de dados.',
+              action: handleClearVoters
+            })}
+            disabled={isResetting || isChecking}
+            className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-all disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-emerald-500 outline-none"
+            aria-label="Limpar todos os eleitores"
+          >
+            <Users className="w-5 h-5" />
+            Limpar Eleitores
           </button>
 
           <button
@@ -670,6 +730,17 @@ export function AdminDashboard() {
               </div>
             </div>
             <div className="p-6">
+              <div className="relative mb-6">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+                <input
+                  type="text"
+                  placeholder="Buscar candidatos..."
+                  value={candidateSearch}
+                  onChange={(e) => setCandidateSearch(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-12 pr-6 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                />
+              </div>
+
               <form onSubmit={handleAddCandidate} className="grid grid-cols-1 sm:grid-cols-5 gap-4 mb-8">
                 <input
                   placeholder="Nome"
@@ -723,7 +794,13 @@ export function AdminDashboard() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <AnimatePresence mode="popLayout">
-                  {candidates.map(c => (
+                  {candidates
+                    .filter(c => 
+                      c.name.toLowerCase().includes(candidateSearch.toLowerCase()) || 
+                      c.number.includes(candidateSearch) ||
+                      c.party.toLowerCase().includes(candidateSearch.toLowerCase())
+                    )
+                    .map(c => (
                     <motion.div
                       key={c.id}
                       layout
@@ -800,6 +877,17 @@ export function AdminDashboard() {
               </div>
             </div>
             <div className="p-6">
+              <div className="relative mb-6">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+                <input
+                  type="text"
+                  placeholder="Buscar eleitores..."
+                  value={voterSearch}
+                  onChange={(e) => setVoterSearch(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-12 pr-6 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                />
+              </div>
+
               <form onSubmit={handleAddVoter} className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-8">
                 <input
                   placeholder="RA"
@@ -835,7 +923,13 @@ export function AdminDashboard() {
 
               <div className="max-h-[400px] overflow-y-auto space-y-2 pr-2 custom-scrollbar" role="list" aria-label="Lista de eleitores">
                 <AnimatePresence mode="popLayout">
-                  {voters.map(v => (
+                  {voters
+                    .filter(v => 
+                      v.name.toLowerCase().includes(voterSearch.toLowerCase()) || 
+                      v.ra.includes(voterSearch) ||
+                      v.class.toLowerCase().includes(voterSearch.toLowerCase())
+                    )
+                    .map(v => (
                     <motion.div
                       key={v.id}
                       layout
@@ -919,6 +1013,50 @@ export function AdminDashboard() {
           </section>
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      <AnimatePresence>
+        {showModal.show && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 max-w-md w-full shadow-2xl"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div className="bg-red-500/10 p-3 rounded-2xl">
+                  <AlertTriangle className="w-8 h-8 text-red-500" />
+                </div>
+                <button 
+                  onClick={() => setShowModal(prev => ({ ...prev, show: false }))}
+                  className="p-2 hover:bg-zinc-800 rounded-xl transition-colors"
+                >
+                  <X className="w-6 h-6 text-zinc-500" />
+                </button>
+              </div>
+
+              <h3 className="text-2xl font-black text-white mb-4">{showModal.title}</h3>
+              <p className="text-zinc-400 mb-8">{showModal.message}</p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  onClick={() => setShowModal(prev => ({ ...prev, show: false }))}
+                  className="px-6 py-4 rounded-2xl font-bold bg-zinc-800 hover:bg-zinc-700 text-white transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={showModal.action}
+                  className="px-6 py-4 rounded-2xl font-bold bg-red-600 hover:bg-red-500 text-white transition-all shadow-lg shadow-red-600/20"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

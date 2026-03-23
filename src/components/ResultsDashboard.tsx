@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, writeBatch, getDocs, doc, updateDoc, addDoc, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Candidate, Voter, Vote } from '../types';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Download, FileJson, FileText, Users, UserCheck, UserX, Hash } from 'lucide-react';
+import { Download, FileJson, FileText, Users, UserCheck, UserX, Hash, RotateCcw, AlertTriangle, X } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 
-export function ResultsDashboard() {
+export function ResultsDashboard({ isAdmin }: { isAdmin: boolean }) {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [voters, setVoters] = useState<Voter[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
+  const [isResetting, setIsResetting] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
 
   useEffect(() => {
     const unsubCandidates = onSnapshot(collection(db, 'candidates'), (snap) => {
@@ -164,6 +166,52 @@ export function ResultsDashboard() {
     doc.save(`boletim_urna_${new Date().getTime()}.pdf`);
   };
 
+  const handleResetResults = async () => {
+    setIsResetting(true);
+    setShowResetModal(false);
+    try {
+      const batch = writeBatch(db);
+
+      // 1. Delete all votes
+      const votesSnap = await getDocs(collection(db, 'votes'));
+      votesSnap.docs.forEach(d => batch.delete(d.ref));
+
+      // 2. Reset voters "voted" status
+      const votersSnap = await getDocs(collection(db, 'voters'));
+      votersSnap.docs.forEach(d => batch.update(d.ref, { voted: false }));
+
+      // 3. Reset candidates "votesCount"
+      const candidatesSnap = await getDocs(collection(db, 'candidates'));
+      candidatesSnap.docs.forEach(d => batch.update(d.ref, { votesCount: 0 }));
+
+      // 4. Delete audit logs
+      const logsSnap = await getDocs(collection(db, 'auditLogs'));
+      logsSnap.docs.forEach(d => batch.delete(d.ref));
+
+      // 5. Reset Urna Status
+      const statusRef = doc(db, 'urnaStatus', 'global');
+      batch.set(statusRef, {
+        isOpen: false,
+        startTime: null,
+        endTime: null
+      }, { merge: true });
+
+      await batch.commit();
+
+      await addDoc(collection(db, 'auditLogs'), {
+        event: 'REINICIALIZAÇÃO DE RESULTADOS',
+        timestamp: new Date().toISOString(),
+        details: 'Os resultados foram zerados pelo administrador através da aba de resultados.'
+      });
+
+      alert('Resultados zerados com sucesso!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'reset_results');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       {/* Stats Grid */}
@@ -280,8 +328,89 @@ export function ResultsDashboard() {
             <FileJson className="w-5 h-5 text-emerald-400" />
             Exportar JSON (Audit)
           </button>
+
+          {isAdmin && (
+            <button
+              onClick={() => setShowResetModal(true)}
+              disabled={isResetting}
+              className="w-full bg-red-900/20 hover:bg-red-900/40 text-red-400 font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-3 border border-red-900/50 disabled:opacity-50"
+            >
+              <RotateCcw className={`w-5 h-5 ${isResetting ? 'animate-spin' : ''}`} />
+              Zerar Resultados
+            </button>
+          )}
         </section>
       </div>
+
+      {/* Reset Confirmation Modal */}
+      <AnimatePresence>
+        {showResetModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 max-w-md w-full shadow-2xl"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div className="bg-red-500/10 p-3 rounded-2xl">
+                  <AlertTriangle className="w-8 h-8 text-red-500" />
+                </div>
+                <button 
+                  onClick={() => setShowResetModal(false)}
+                  className="p-2 hover:bg-zinc-800 rounded-xl transition-colors"
+                >
+                  <X className="w-6 h-6 text-zinc-500" />
+                </button>
+              </div>
+
+              <h3 className="text-2xl font-black text-white mb-4">Aviso de Reinicialização</h3>
+              
+              <div className="space-y-4 text-zinc-400 mb-8">
+                <p>Você está prestes a zerar todos os resultados da eleição atual. Esta ação é irreversível.</p>
+                
+                <ul className="space-y-2 text-sm">
+                  <li className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    Todos os votos serão apagados permanentemente.
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    O status de "Votou" dos eleitores será resetado.
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    Os contadores dos candidatos voltarão a zero.
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    Os logs de auditoria serão limpos.
+                  </li>
+                </ul>
+
+                <p className="text-sm font-bold text-zinc-300">
+                  Nota: Os candidatos e eleitores cadastrados NÃO serão removidos.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  onClick={() => setShowResetModal(false)}
+                  className="px-6 py-4 rounded-2xl font-bold bg-zinc-800 hover:bg-zinc-700 text-white transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleResetResults}
+                  className="px-6 py-4 rounded-2xl font-bold bg-red-600 hover:bg-red-500 text-white transition-all shadow-lg shadow-red-600/20"
+                >
+                  Confirmar e Zerar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -16,6 +16,9 @@ export default function App() {
   const [urnaStatus, setUrnaStatus] = useState<UrnaStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
@@ -42,11 +45,27 @@ export default function App() {
   }, [user, isAdmin]);
 
   const handleLogin = async () => {
+    if (isLoggingIn) return;
+    
+    setIsLoggingIn(true);
+    setLoginError(null);
     const provider = new GoogleAuthProvider();
+    
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login error:', error);
+      if (error.code === 'auth/popup-blocked') {
+        setLoginError('O navegador bloqueou a janela de login. Por favor, permita popups para este site.');
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        setLoginError('Uma solicitação de login já está em andamento.');
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        setLoginError('A janela de login foi fechada antes da conclusão.');
+      } else {
+        setLoginError('Ocorreu um erro ao tentar fazer login. Tente novamente.');
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -79,10 +98,35 @@ export default function App() {
           <p className="text-zinc-400 mb-8 italic serif">Sistema Escolar Auditável de Votação</p>
           <button
             onClick={handleLogin}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20"
+            disabled={isLoggingIn}
+            className={`w-full ${isLoggingIn ? 'bg-zinc-700 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500'} text-white font-semibold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20`}
           >
-            Acessar com Google
+            {isLoggingIn ? (
+              <>
+                <motion.div 
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  className="w-5 h-5 border-2 border-white border-t-transparent rounded-full"
+                />
+                Entrando...
+              </>
+            ) : (
+              'Acessar com Google'
+            )}
           </button>
+          
+          <AnimatePresence>
+            {loginError && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm"
+              >
+                {loginError}
+              </motion.div>
+            )}
+          </AnimatePresence>
           <p className="mt-6 text-xs text-zinc-500 uppercase tracking-widest">Integridade Garantida por Hashing</p>
         </motion.div>
       </div>
@@ -173,7 +217,7 @@ export default function App() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
             >
-              <ResultsDashboard />
+              <ResultsDashboard isAdmin={isAdmin} />
             </motion.div>
           )}
         </AnimatePresence>
